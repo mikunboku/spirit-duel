@@ -355,6 +355,19 @@ function speak(text, side = 0) {
   } catch (e) { /* voice is optional */ }
 }
 
+const VKEYS = ['start', 'light1', 'light2', 'heavy', 'heavyhit', 'leap', 'rush', 'stop', 'charge', 'guard', 'hit1', 'hit2', 'ko', 'win'];
+const vbuf = {}; let vgain = null;
+function voiceInit() {
+  if (vgain) return; vgain = actx.createGain(); vgain.gain.value = 1.6; vgain.connect(master);
+  for (const sd of [0, 1]) for (const k of VKEYS) fetch(`assets/voice/v${sd}_${k}.mp3`).then((r) => r.arrayBuffer()).then((b) => actx.decodeAudioData(b)).then((b) => { vbuf[`${sd}_${k}`] = b; }).catch(() => {});
+}
+function voice(side, key, delay = 0) {
+  if (!actx || !vgain || !music.on) return;
+  if (Array.isArray(key)) key = key[rand(key.length) | 0];
+  const b = vbuf[`${side}_${key}`]; if (!b) return;
+  const src = actx.createBufferSource(); src.buffer = b; src.connect(vgain); src.start(actx.currentTime + delay);
+}
+
 // ---------------------------------------------------------------- rules of the game
 const CELLS = 8, TICKS = 6, TURNS = 8;
 const cellX = (c) => (c - (CELLS - 1) / 2) * 2.4;
@@ -641,13 +654,14 @@ function applyHit(att, tgt, dmg, guarded, m, big) {
   tgt.hp = Math.max(0, tgt.hp - dmg);
   if (guarded) {
     spawn(pos, { color: 0x9fd0ff, sx: 1.2, life: 0.14, grow: 5 }); SFX.guard(); tgt.xOffV = -tgt.facing * 3;
-    if (big) { sfxText('ガキン', pos, '#bfe0ff', 44); G.shake = Math.max(G.shake, 0.12); }
+    if (big) { sfxText('ガキン', pos, '#bfe0ff', 44); G.shake = Math.max(G.shake, 0.12); voice(tgt.side, 'guard', 0.1); }
   } else {
     burst(pos, att.col.hex, big ? (m.heavy ? 22 : 12) : 5, m.heavy && big ? 1.5 : big ? 1 : 0.6);
     if (big) { (m.heavy ? SFX.heavy : SFX.hit)(); sfxText(m.text[rand(m.text.length) | 0], pos.clone().add(new THREE.Vector3(0, 0.6, 0)), att.col.css, m.heavy ? 88 : 56); }
     else SFX.rush();
     G.hitstop = Math.max(G.hitstop, big ? (m.heavy ? 0.13 : 0.07) : 0.012);
     G.shake = Math.max(G.shake, big ? (m.heavy ? 0.45 : 0.18) : 0.07);
+    if (big && tgt.hp > 0 && !(tgt.frozen > 0) && Math.random() < 0.6) voice(tgt.side, ['hit1', 'hit2'], 0.12);
     if (!(tgt.frozen > 0)) { tgt.set('hit'); tgt.xOffV = -tgt.facing * (m.heavy ? 7 : 4); }
   }
   if (big && dmg >= 1) note('-' + Math.round(dmg), tgt, '#fff', 26);
@@ -669,7 +683,7 @@ async function attack(f, foe, key) {
   };
   f.set('attack', mk);
   if (m.rush) {
-    cutin('rush', f, 'ラッシュ'); speak('ラッシュ！', f.side);
+    cutin('rush', f, 'ラッシュ'); voice(f.side, 'rush', 0.15);
     f.play('punch', { loop: true, dur: 0.17, fade: 0.05 });
     await sleep(m.from);
     const n = Math.floor((m.to - m.from) / m.every);
@@ -679,7 +693,7 @@ async function attack(f, foe, key) {
     land(total * 0.4, true);
     await sleep(m.dur - m.final);
   } else {
-    f.play(m.anim, { dur: m.dur, fade: 0.05 }); SFX.whoosh();
+    f.play(m.anim, { dur: m.dur, fade: 0.05 }); SFX.whoosh(); voice(f.side, mk === 'light' ? ['light1', 'light2'] : mk === 'heavy' ? 'heavyhit' : 'leap');
     await sleep(m.hit); land(total, true); await sleep(0.38);
   }
   if (f.state === 'attack') f.idle();
@@ -699,7 +713,7 @@ async function runTick() {
   if (st.length === 2) { for (const f of st) { f.set('cast'); f.play('roar', { dur: 0.9 }); note('相殺', f, '#fff', 24); } SFX.guard(); await sleep(0.8); }
   else if (st.length === 1) {
     const f = st[0], o = other(f);
-    f.set('cast'); f.play('roar', { dur: 1.0 }); cutin('stop', f, '時よ、凍れ'); speak('時よ、凍れ', f.side);
+    f.set('cast'); f.play('roar', { dur: 1.0 }); cutin('stop', f, '時よ、凍れ'); voice(f.side, 'stop', 0.15);
     await sleep(0.45);
     o.frozen = 4; o.windup = false; o.act = 'frozen'; bubble(o.side, LABEL.frozen); fire(o.side, -1); stopFx(true);
     await sleep(0.45);
@@ -718,9 +732,9 @@ async function runTick() {
     if (f.act === 'guard') { f.set('guard'); }
     if (f.act === 'charge') { f.gauge = Math.min(100, f.gauge + 20); f.set('cast'); f.play('roar', { dur: 1.2 }); note('ゲージ +20', f, f.col.css, 22);
       for (let i = 0; i < 10; i++) spawn(new THREE.Vector3(f.x + rand(-0.7, 0.7), rand(0.2, 1), rand(-0.3, 0.5)), { color: f.col.hex, sx: rand(0.12, 0.25), life: rand(0.5, 0.9), v: new THREE.Vector3(0, rand(2, 4), 0) });
-      tone(220, 660, 0.4, 0.25, 'triangle'); pause = true; }
+      tone(220, 660, 0.4, 0.25, 'triangle'); voice(f.side, 'charge'); pause = true; }
     if (f.act === 'heavy') { f.windup = true; f.set('attack', 'heavy'); const a = f.play('swipe', { dur: 0.8, fade: 0.1 }); a.time = a.getClip().duration * 0.16; a.paused = true;
-      note('構え', f, '#ffd766', 22); tone(140, 90, 0.3, 0.3, 'sawtooth'); pause = true; }
+      note('構え', f, '#ffd766', 22); tone(140, 90, 0.3, 0.3, 'sawtooth'); voice(f.side, 'heavy'); pause = true; }
   }
   if (pause) await sleep(0.55);
   // attacks, fastest first
@@ -754,12 +768,12 @@ async function runTurn() {
 function finish(losers) {
   G.over = true; setMode('over'); bubble(0, ''); bubble(1, '');
   const draw = losers.length === 2, w = draw ? null : other(losers[0]);
-  for (const v of losers) { v.frozen = 0; v.set('ko'); v.airT = 0; v.airV = 6.5; v.xOffV = -v.facing * 4; v.play('dying', { dur: 1.6 }); }
+  for (const v of losers) { v.frozen = 0; v.set('ko'); v.airT = 0; v.airV = 6.5; v.xOffV = -v.facing * 4; v.play('dying', { dur: 1.6 }); voice(v.side, 'ko', 0.3); }
   P.frozen = E.frozen = 0; if (G.stopFx) { G.stopFx = false; canvas.style.filter = ''; }
   G.slow = 1.6; G.hitstop = 0.28; G.shake = 0.8; SFX.ko(); flash(0.9, 400); G.winner = w;
   if (w) setTimeout(() => cutin('finish', w, ''), 350);
-  setTimeout(() => { banner(draw ? 'DRAW' : 'K.O.', true); speak(draw ? '相打ち' : 'ケーオー'); }, 1300);
-  if (w) setTimeout(() => { w.set('win'); w.play('flex', { loop: true, fade: 0.3 }); }, 1700);
+  setTimeout(() => { banner(draw ? 'DRAW' : 'K.O.', true); }, 1300);
+  if (w) setTimeout(() => { w.set('win'); w.play('flex', { loop: true, fade: 0.3 }); voice(w.side, 'win', 0.4); }, 1700);
   setTimeout(() => showResult(w, draw ? '相打ちです。' : ''), 4200);
 }
 function timeUp() {
@@ -774,7 +788,6 @@ function showResult(w, msg) {
   $('#restext').textContent = w === P ? 'YOU WIN' : w === E ? 'YOU LOSE' : 'DRAW';
   $('#resmsg').textContent = msg + (w === P ? (last ? '全レベル制覇です。' : `レベル${G.level + 1}「${LEVELS[G.level].name}」を攻略しました。`) : '相手の作戦をもう一度読んで、ブロックの順番と条件を見直してみましょう。');
   $('#again').textContent = w === P ? (last ? '最初から' : '次のレベルへ') : '作戦を練り直す';
-  speak(w === P ? '勝利' : w === E ? '敗北' : '引き分け');
   $('#result').style.display = 'flex';
 }
 function startLevel() {
@@ -785,7 +798,7 @@ function startLevel() {
   $('#fname').textContent = LEVELS[G.level].name.toUpperCase() === LEVELS[G.level].name ? 'RIVAL' : `RIVAL ― ${LEVELS[G.level].name}`;
   $('#hint').textContent = `ヒント：${LEVELS[G.level].hint}`;
   bubble(0, ''); bubble(1, ''); drawRules(); drawFoeRules(); drawSteps(); setMode('plan');
-  banner(`LEVEL ${G.level + 1}`); SFX.start();
+  banner(`LEVEL ${G.level + 1}`); SFX.start(); setTimeout(() => voice(0, 'start'), 900);
 }
 
 // ---------------------------------------------------------------- buttons
@@ -794,8 +807,8 @@ $('#speed').addEventListener('click', () => { G.speed = G.speed === 1 ? 2 : 1; $
 $('#sound').addEventListener('click', () => { music.on = !music.on; master.gain.value = music.on ? 0.5 : 0; if (!music.on && window.speechSynthesis) speechSynthesis.cancel(); $('#sound').textContent = music.on ? '音 ON' : '音 OFF'; });
 $('#help').addEventListener('click', () => { $('#helpbox').style.display = 'flex'; });
 $('#helpclose').addEventListener('click', () => { $('#helpbox').style.display = 'none'; });
-$('#start').addEventListener('click', () => { initAudio(); musicInit(); G.level = 0; startLevel(); });
-$('#again').addEventListener('click', () => { initAudio(); musicInit(); if (G.winner === P) G.level = (G.level + 1) % LEVELS.length; startLevel(); });
+$('#start').addEventListener('click', () => { initAudio(); musicInit(); voiceInit(); G.level = 0; startLevel(); });
+$('#again').addEventListener('click', () => { initAudio(); musicInit(); voiceInit(); if (G.winner === P) G.level = (G.level + 1) % LEVELS.length; startLevel(); });
 $('#howto').innerHTML = HOWTO; $('#howto2').innerHTML = HOWTO;
 window.addEventListener('keydown', (e) => { if (e.code === 'Enter' && G.mode === 'plan' && !['SELECT', 'BUTTON'].includes(document.activeElement?.tagName)) $('#run').click(); });
 

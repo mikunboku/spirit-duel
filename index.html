@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>守護霊バトル</title>
+<style>
+  :root { --p1:#35e6d0; --p2:#ff4d7a; --gold:#ffd766; --cond:#ffd766; --act:#6fb6ff; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:#05060a; overflow:hidden; color:#fff;
+    font-family: "Hiragino Kaku Gothic StdN","Hiragino Sans","Yu Gothic","Meiryo",sans-serif; }
+  #stage { position:fixed; inset:0; }
+  canvas { display:block; width:100%; height:100%; transition: filter .25s; }
+  .layer { position:fixed; inset:0; pointer-events:none; }
+
+  /* HUD */
+  #hud { display:none; }
+  .bars { position:absolute; top:14px; left:3vw; right:3vw; display:flex; align-items:flex-start; gap:14px; }
+  .side { flex:1; }
+  .name { font-weight:900; font-size:13px; letter-spacing:.12em; margin-bottom:4px; text-shadow:0 2px 6px #000; }
+  .side.r .name { text-align:right; }
+  .hp { position:relative; height:20px; background:#1a1218; border:2px solid #e9e4d8; transform:skewX(-18deg);
+    box-shadow:0 3px 12px #000a; overflow:hidden; }
+  .hp i { position:absolute; top:0; bottom:0; left:0; width:100%; }
+  .hp .trail { background:#fff; transition: width .5s .25s; }
+  .hp .fill { background:linear-gradient(#ffe97a,#f29a1f); transition: width .08s; }
+  .side.r .hp i { left:auto; right:0; }
+  .hp.low .fill { background:linear-gradient(#ff8a7a,#d81f3a); }
+  .gbar { position:relative; height:9px; margin-top:6px; width:70%; background:#101018; border:2px solid #cfd3e6; transform:skewX(-18deg); overflow:hidden; }
+  .side.r .gbar { margin-left:30%; }
+  .gbar i { position:absolute; inset:0 auto 0 0; width:0; background:linear-gradient(90deg,#1b8f9c,var(--p1)); transition:width .15s; }
+  .side.r .gbar i { inset:0 0 0 auto; background:linear-gradient(270deg,#9c1b4a,var(--p2)); }
+  .gbar.full i { animation:pulse .5s infinite alternate; }
+  @keyframes pulse { to { filter:brightness(1.8); } }
+  .gnum { font-size:11px; font-weight:700; margin-top:3px; opacity:.9; text-shadow:0 1px 4px #000; font-variant-numeric:tabular-nums; }
+  .side.r .gnum { text-align:right; }
+  #timer { width:92px; text-align:center; font-weight:900; line-height:1.05; margin-top:10px; text-shadow:0 3px 0 #000, 0 0 14px #000; }
+  #timer b { display:block; font-size:30px; font-variant-numeric:tabular-nums; }
+  #timer small { font-size:10px; letter-spacing:.2em; opacity:.8; }
+
+  .bub { position:absolute; transform:translate(-50%,-100%); padding:4px 12px; font-size:14px; font-weight:900; white-space:nowrap;
+    background:#000c; border:2px solid var(--p1); border-radius:14px; opacity:0; transition:opacity .15s; }
+  .bub.r { border-color:var(--p2); }
+  .bub.on { opacity:1; }
+
+  /* big messages */
+  #banner { display:flex; align-items:center; justify-content:center; padding-bottom:22vh; }
+  #banner span { font-weight:900; font-style:italic; font-size:clamp(50px,11vw,160px); letter-spacing:.04em; color:#fff;
+    -webkit-text-stroke:3px #000; text-shadow:0 0 30px var(--gold), 6px 8px 0 #000; opacity:0; }
+  #banner span.show { animation:slam .9s cubic-bezier(.2,1.4,.4,1) forwards; }
+  @keyframes slam { 0%{opacity:0; transform:scale(3) rotate(-6deg);} 25%{opacity:1; transform:scale(1) rotate(-3deg);}
+    80%{opacity:1; transform:scale(1.04) rotate(-3deg);} 100%{opacity:0; transform:scale(1.2) rotate(-3deg);} }
+  #banner span.stay { animation:slamstay .5s cubic-bezier(.2,1.4,.4,1) forwards; }
+  @keyframes slamstay { 0%{opacity:0; transform:scale(3) rotate(-6deg);} 100%{opacity:1; transform:scale(1) rotate(-3deg);} }
+
+  .sfx { position:absolute; font-weight:900; font-style:italic; white-space:nowrap; line-height:1;
+    -webkit-text-stroke:2px #000; text-shadow:4px 5px 0 #000; transform-origin:center; animation:sfx .7s ease-out forwards; }
+  @keyframes sfx { 0%{opacity:0; transform:translate(-50%,-50%) scale(.3) rotate(var(--r));}
+    18%{opacity:1; transform:translate(-50%,-50%) scale(1.25) rotate(var(--r));}
+    100%{opacity:0; transform:translate(-50%,-110%) scale(1) rotate(var(--r));} }
+  .sfx.slow { animation-duration:1.6s; }
+  .sfx.plain { font-style:normal; -webkit-text-stroke:1px #000; text-shadow:2px 2px 0 #000; animation-duration:1.1s; }
+
+  /* cut-in */
+  #cutin { display:none; background:#000b; z-index:6; }
+  #cutin.on { display:block; }
+  #cutin .strip { position:absolute; left:-4vw; right:-4vw; top:42%; height:40vh; margin-top:-20vh;
+    background-size:cover; background-position:center 30%; transform:rotate(-4deg);
+    border-top:5px solid #fff; border-bottom:5px solid #fff; box-shadow:0 0 60px #000, 0 0 0 100vh #0006;
+    animation:cutin .8s cubic-bezier(.1,.9,.2,1) forwards; }
+  #cutin.right .strip { animation-name:cutinR; }
+  #cutin.foe .strip { filter:hue-rotate(170deg) saturate(1.3); }
+  @keyframes cutin { 0%{transform:rotate(-4deg) translateX(-110%);} 22%{transform:rotate(-4deg) translateX(0);}
+    100%{transform:rotate(-4deg) translateX(3%) scale(1.04);} }
+  @keyframes cutinR { 0%{transform:rotate(-4deg) translateX(110%);} 22%{transform:rotate(-4deg) translateX(0);}
+    100%{transform:rotate(-4deg) translateX(-3%) scale(1.04);} }
+  #cutin .label { position:absolute; left:0; right:0; top:calc(42% + 16vh); text-align:center; font-weight:900; font-style:italic;
+    font-size:clamp(26px,5vw,70px); letter-spacing:.2em; -webkit-text-stroke:2px #000; text-shadow:0 0 24px var(--p1), 4px 5px 0 #000;
+    animation:lbl .8s ease-out forwards; }
+  #cutin.foe .label { text-shadow:0 0 24px var(--p2), 4px 5px 0 #000; }
+  @keyframes lbl { 0%{opacity:0; letter-spacing:1em;} 30%{opacity:1; letter-spacing:.2em;} }
+
+  #flash { background:#fff; opacity:0; }
+  #stopring { display:flex; align-items:center; justify-content:center; }
+  #stopring i { width:20px; height:20px; border-radius:50%; border:6px solid #fff; opacity:0; mix-blend-mode:difference; background:#fff; }
+  #stopring i.go { animation:ring .9s ease-out forwards; }
+  @keyframes ring { 0%{opacity:1; transform:scale(1);} 100%{opacity:0; transform:scale(180);} }
+
+  /* program panels */
+  #plan { display:none; position:fixed; left:0; right:0; bottom:0; padding:26px 12px 10px; gap:10px; z-index:4;
+    grid-template-columns:minmax(0,1.45fr) 132px minmax(0,1fr); align-items:end;
+    background:linear-gradient(#0000, #06070dcc 22%, #06070df2); }
+  .panel { background:#0b0d18e6; border:1px solid #ffffff2e; border-radius:8px; padding:8px; min-width:0; }
+  .panel.me { border-top:3px solid var(--p1); }
+  .panel.foe { border-top:3px solid var(--p2); }
+  .ph { display:flex; align-items:baseline; gap:8px; font-weight:900; font-size:13px; letter-spacing:.08em; margin-bottom:6px; }
+  .ph small { font-weight:400; font-size:10.5px; opacity:.7; letter-spacing:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rule { display:flex; align-items:center; gap:4px; padding:3px 4px; margin-bottom:3px; border-radius:6px; background:#161a2c;
+    border-left:4px solid #5a4fd0; font-size:12px; min-height:30px; transition:background .15s, box-shadow .15s, opacity .15s; }
+  .rule .no { width:14px; text-align:center; opacity:.6; font-weight:700; flex:none; }
+  .rule .kw { flex:none; font-weight:700; opacity:.85; font-size:11px; }
+  .rule select, .rule .tag { flex:1 1 0; min-width:0; font:inherit; font-weight:700; border:0; border-radius:5px; padding:4px 4px; color:#111;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rule .c { background:var(--cond); }
+  .rule .c.none { background:#3a3f55; color:#aab; flex:0 0 46px; }
+  .rule .a { background:var(--act); }
+  .rule select:disabled { opacity:1; }
+  .rule button { flex:none; width:20px; height:22px; padding:0; font-size:11px; border:0; border-radius:4px; background:#2a2f48; color:#cdd; cursor:pointer; }
+  .rule button:hover { background:#3d4468; }
+  .rule.fire { background:#2c3a22; box-shadow:0 0 0 2px #9dff6a, 0 0 16px #9dff6a88; }
+  .panel.foe .rule.fire { background:#3a2228; box-shadow:0 0 0 2px #ff8fa8, 0 0 16px #ff8fa888; }
+  .running .rule:not(.fire) { opacity:.55; }
+  .running .rule button, .running #add { visibility:hidden; }
+  #add { width:100%; margin-top:2px; font:inherit; font-size:12px; font-weight:700; padding:5px; border:1px dashed #ffffff55; border-radius:6px;
+    background:transparent; color:#cfe; cursor:pointer; }
+  #add:hover { background:#ffffff14; }
+  .mid { display:flex; flex-direction:column; gap:6px; align-items:stretch; text-align:center; }
+  #lv { font-weight:900; font-size:13px; line-height:1.3; text-shadow:0 2px 6px #000; }
+  #lv small { display:block; font-weight:400; font-size:11px; opacity:.8; }
+  #steps { display:flex; justify-content:center; gap:5px; }
+  #steps i { width:11px; height:11px; border-radius:50%; background:#2a2f48; border:1px solid #fff5; }
+  #steps i.on { background:var(--gold); box-shadow:0 0 8px var(--gold); }
+  #steps i.done { background:#8a7a3a; }
+  .mini { pointer-events:auto; font:inherit; font-size:12px; font-weight:700; padding:5px 4px; border:1px solid #fff5; border-radius:6px; background:#161a2c; color:#fff; cursor:pointer; }
+  .mini:hover { background:#252b48; }
+  #hint { grid-column:1 / -1; font-size:12px; line-height:1.5; padding:6px 10px; background:#000a; border-left:3px solid var(--gold); border-radius:4px; }
+  #plan > * { pointer-events:auto; }
+
+  /* screens */
+  .screen { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+    background:radial-gradient(ellipse at center, #1a1030cc, #05060af2); z-index:10; padding:16px; overflow:auto; }
+  .screen h1 { font-size:clamp(36px,7vw,96px); margin:0; font-weight:900; font-style:italic; letter-spacing:.06em;
+    -webkit-text-stroke:2px #000; text-shadow:0 0 34px var(--p1), 5px 6px 0 #000; }
+  .screen p.sub { margin:8px 0 18px; letter-spacing:.3em; opacity:.8; font-size:13px; }
+  .how { max-width:640px; text-align:left; font-size:13.5px; line-height:1.75; margin-bottom:20px; background:#0008; border:1px solid #fff3; padding:14px 20px; border-radius:6px; }
+  .how b { color:var(--gold); }
+  .how table { border-collapse:collapse; width:100%; margin-top:6px; font-size:12.5px; }
+  .how td { padding:3px 8px 3px 0; vertical-align:top; border-top:1px solid #fff2; }
+  .how td:first-child { white-space:nowrap; font-weight:900; color:var(--act); }
+  .btn { pointer-events:auto; cursor:pointer; font:inherit; font-weight:900; font-size:18px; letter-spacing:.16em; color:#000;
+    background:var(--gold); border:0; padding:12px 30px; transform:skewX(-14deg); box-shadow:5px 6px 0 #000; }
+  .btn:hover { filter:brightness(1.15); }
+  .btn:disabled { background:#555; color:#999; cursor:default; }
+  #run { font-size:15px; padding:10px 6px; letter-spacing:.1em; }
+  #loadmsg { margin-top:14px; font-size:13px; opacity:.75; min-height:1.2em; }
+  #result, #helpbox { display:none; }
+  #result { background:radial-gradient(ellipse at center, #0006, #000d); }
+  #result h1 { margin-bottom:10px; }
+  #resmsg { margin:0 0 22px; font-size:15px; opacity:.9; max-width:560px; line-height:1.7; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="stage"></div>
+
+<div id="hud" class="layer">
+  <div class="bars">
+    <div class="side l"><div class="name">YOU</div><div class="hp" id="hp0"><i class="trail"></i><i class="fill"></i></div>
+      <div class="gbar" id="g0"><i></i></div><div class="gnum" id="gn0">ゲージ 0</div></div>
+    <div id="timer"><small>TURN</small><b>1</b></div>
+    <div class="side r"><div class="name" id="fname">RIVAL</div><div class="hp" id="hp1"><i class="trail"></i><i class="fill"></i></div>
+      <div class="gbar" id="g1"><i></i></div><div class="gnum" id="gn1">ゲージ 0</div></div>
+  </div>
+  <div class="bub" id="bub0"></div><div class="bub r" id="bub1"></div>
+</div>
+
+<div id="fx" class="layer"></div>
+<div id="stopring" class="layer"><i></i></div>
+<div id="flash" class="layer"></div>
+<div id="cutin" class="layer"><div class="strip"></div><div class="label"></div></div>
+<div id="banner" class="layer"><span></span></div>
+
+<div id="plan">
+  <div id="hint"></div>
+  <div class="panel me">
+    <div class="ph"><span>あなたの作戦</span><small>毎ステップ、上から調べて最初に当てはまった1つを実行</small></div>
+    <div id="rules"></div>
+    <button id="add">＋ ブロックを追加</button>
+  </div>
+  <div class="mid">
+    <div id="lv"></div>
+    <div id="steps"></div>
+    <button class="btn" id="run">▶ 実行</button>
+    <button class="mini" id="speed">速さ ×1</button>
+    <button class="mini" id="help">ルール</button>
+    <button class="mini" id="sound">音 ON</button>
+  </div>
+  <div class="panel foe">
+    <div class="ph"><span>相手の作戦</span><small>読み解いて対策を組む</small></div>
+    <div id="frules"></div>
+  </div>
+</div>
+
+<div id="title" class="screen">
+  <h1>守護霊バトル</h1>
+  <p class="sub">SPIRIT DUEL ― 作戦を組んで戦う</p>
+  <div class="how" id="howto"></div>
+  <button class="btn" id="start" disabled>読み込み中</button>
+  <div id="loadmsg"></div>
+</div>
+
+<div id="helpbox" class="screen">
+  <div class="how" id="howto2"></div>
+  <button class="btn" id="helpclose">閉じる</button>
+</div>
+
+<div id="result" class="screen">
+  <h1 id="restext"></h1>
+  <p id="resmsg"></p>
+  <button class="btn" id="again">もう一度</button>
+</div>
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>
